@@ -16,30 +16,57 @@ export default async function handler(req, res) {
     const cleanUser = username.replace('@', '').trim();
 
     try {
-        const targetUrl = `https://www.tiktok.com/@${cleanUser}`;
-        const response = await fetch(targetUrl, {
+        // Запрос к открытому сервису парсинга TikTok
+        const apiUrl = `https://user.tikmatrix.com/api/user?username=${encodeURIComponent(cleanUser)}`;
+        const response = await fetch(apiUrl, {
             headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Accept-Language': 'en-US,en;q=0.9'
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
             }
         });
 
-        if (!response.ok) {
-            return res.status(404).json({ error: 'User not found' });
+        if (response.ok) {
+            const data = await response.json();
+            if (data && data.profile) {
+                const p = data.profile;
+                const avatar = p['Avatar URL'] || p['Avatar'] || '';
+                const followers = p['Followers'] || p['Follower Count'] || '0';
+                const likes = p['Likes'] || p['Heart'] || '0';
+                const nickname = p['Nickname'] || cleanUser;
+
+                return res.status(200).json({
+                    username: cleanUser,
+                    nickname: nickname,
+                    avatar: avatar,
+                    description: `${followers} followers • ${likes} likes`
+                });
+            }
         }
+    } catch (e) {
+        // Fallback to HTML scrape
+    }
+
+    // Резервный поиск напрямую через TikTok HTML
+    try {
+        const targetUrl = `https://www.tiktok.com/@${encodeURIComponent(cleanUser)}`;
+        const response = await fetch(targetUrl, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+            }
+        });
 
         const html = await response.text();
 
         let avatarUrl = '';
         const ogImageMatch = html.match(/<meta property="og:image" content="([^"]+)"/i);
         if (ogImageMatch && ogImageMatch[1]) {
-            avatarUrl = ogImageMatch[1];
+            avatarUrl = ogImageMatch[1].replace(/&amp;/g, '&');
         }
 
         let description = 'Active User';
         const ogDescMatch = html.match(/<meta property="og:description" content="([^"]+)"/i);
         if (ogDescMatch && ogDescMatch[1]) {
-            description = ogDescMatch[1];
+            description = ogDescMatch[1].replace(/&amp;/g, '&');
         }
 
         return res.status(200).json({
@@ -49,6 +76,10 @@ export default async function handler(req, res) {
         });
 
     } catch (error) {
-        return res.status(500).json({ error: 'Failed', details: error.message });
+        return res.status(200).json({
+            username: cleanUser,
+            avatar: '',
+            description: 'Active User'
+        });
     }
 }
